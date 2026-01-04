@@ -1,31 +1,41 @@
 """
-AI Pulse TON - FastAPI Backend
-Сервер для AI-анализа TON экосистемы
+AI Pulse TON - FastAPI Backend с полноценным LangGraph
 """
 
 import os
+import logging
+from typing import TypedDict, Annotated, Literal
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 import httpx
-from typing import Optional
 from datetime import datetime
+
+# LangGraph imports
+from langgraph.graph import StateGraph, END
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
 # Загрузка переменных окружения
 load_dotenv()
 
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("ai_pulse_ton")
+
 # Конфигурация
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-AI_MODEL = os.getenv("AI_MODEL", "anthropic/claude-3.5-sonnet")
+AI_MODEL = os.getenv("AI_MODEL", "minimax/minimax-m2.1")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 TONCENTER_API_KEY = os.getenv("TONCENTER_API_KEY", "")
-PAYMENT_WALLET = os.getenv("PAYMENT_WALLET", "")
 
 app = FastAPI(
     title="AI Pulse TON",
-    description="AI-powered TON ecosystem analysis",
-    version="1.0.0"
+    description="AI-powered TON ecosystem analysis with LangGraph",
+    version="2.0.0"
 )
 
 # CORS настройки
@@ -43,27 +53,32 @@ app.add_middleware(
 )
 
 
-class AnalysisReport(BaseModel):
-    status: str
-    report: str
-    sentiment: str  # bullish, bearish, neutral
-    details: list[dict] = []
-    wallet_info: Optional[dict] = None
-    timestamp: str
+# ============ LANGGRAPH STATE ============
+
+class AgentState(TypedDict):
+    """Состояние агента, передаваемое между узлами"""
+    wallet_address: str
+    wallet_info: dict | None
+    ton_api_error: str | None
+    ai_analysis: str | None
+    sentiment: str
+    details: list[dict]
+    deep_mode: bool
+    final_report: str | None
 
 
-class WalletInfo(BaseModel):
-    address: str
-    balance: Optional[float] = None
-    transactions_count: Optional[int] = None
+# ============ TOOLS / УЗЛЫ ГРАФА ============
 
-
-async def get_wallet_info(wallet_address: str) -> dict:
-    """Получение информации о кошельке через TON API"""
+async def fetch_wallet_info(state: AgentState) -> AgentState:
+    """
+    Узел 1: Получение информации о кошельке через TON API
+    """
+    wallet_address = state["wallet_address"]
+    logger.info(f"[Node: fetch_wallet_info] Fetching info for wallet: {wallet_address[:20]}...")
+    
     try:
         async with httpx.AsyncClient() as client:
-            # Используем публичный TON API
-            url = f"https://testnet.toncenter.com/api/v2/getAddressInformation"
+            url = "https://toncenter.com/api/v2/getAddressInformation"
             params = {"address": wallet_address}
             
             if TONCENTER_API_KEY:
@@ -75,55 +90,67 @@ async def get_wallet_info(wallet_address: str) -> dict:
                 data = response.json()
                 if data.get("ok"):
                     result = data.get("result", {})
-                    # Конвертируем balance из наноТОН в TON
                     balance_nano = int(result.get("balance", 0))
                     balance_ton = balance_nano / 1e9
                     
-                    return {
+                    wallet_info = {
                         "balance": round(balance_ton, 4),
                         "status": result.get("state", "unknown"),
                         "last_activity": result.get("last_transaction_lt", "N/A")
                     }
+                    
+                    logger.info(f"[Node: fetch_wallet_info] Success: balance={balance_ton} TON")
+                    return {**state, "wallet_info": wallet_info, "ton_api_error": None}
+            
+            logger.warning(f"[Node: fetch_wallet_info] API returned non-200: {response.status_code}")
+            return {**state, "wallet_info": None, "ton_api_error": f"API error: {response.status_code}"}
+            
     except Exception as e:
-        print(f"Error fetching wallet info: {e}")
-    
-    return {"balance": None, "status": "unknown", "last_activity": None}
+        logger.error(f"[Node: fetch_wallet_info] Exception: {e}")
+        return {**state, "wallet_info": None, "ton_api_error": str(e)}
 
 
-async def generate_ai_analysis(wallet_address: str, wallet_info: dict, deep: bool = False) -> dict:
-    """Генерация AI анализа через OpenRouter"""
+async def analyze_with_ai(state: AgentState) -> AgentState:
+    """
+    Узел 2: AI-анализ через OpenRouter
+    """
+    logger.info(f"[Node: analyze_with_ai] Starting AI analysis, deep_mode={state['deep_mode']}")
     
     if not OPENROUTER_API_KEY:
-        # Фоллбэк если нет API ключа
+        logger.warning("[Node: analyze_with_ai] No API key, using fallback")
         return {
-            "report": "🔍 Демо-режим: API ключ не настроен. TON экосистема показывает признаки роста. Рекомендуется диверсификация портфеля.",
-            "sentiment": "neutral",
-            "details": [
-                {"icon": "💰", "text": f"Баланс: {wallet_info.get('balance', 'N/A')} TON"},
-                {"icon": "📊", "text": "Демо-анализ без AI"},
-            ]
+            **state,
+            "ai_analysis": "🔍 Демо-режим: API ключ не настроен. TON экосистема показывает признаки роста.",
+            "sentiment": "neutral"
         }
     
-    # Формируем промпт для AI
-    analysis_type = "глубокий и детальный" if deep else "краткий"
+    wallet_info = state.get("wallet_info") or {}
+    ton_error = state.get("ton_api_error")
+    deep = state.get("deep_mode", False)
     
-    prompt = f"""Ты — AI-аналитик криптовалютного рынка, специализирующийся на TON экосистеме.
-
-Проанализируй кошелек и текущее состояние TON рынка:
-
-Адрес кошелька: {wallet_address}
+    # Формируем контекст для AI
+    context = f"""
+Адрес кошелька: {state['wallet_address']}
 Баланс: {wallet_info.get('balance', 'неизвестно')} TON
 Статус: {wallet_info.get('status', 'неизвестно')}
+Ошибка TON API: {ton_error or 'нет'}
+"""
+    
+    analysis_type = "глубокий и детальный" if deep else "краткий"
+    
+    prompt = f"""Ты — AI-аналитик криптовалютного рынка TON. 
 
-Предоставь {analysis_type} анализ:
+ДАННЫЕ О КОШЕЛЬКЕ:
+{context}
+
+ЗАДАЧА: Предоставь {analysis_type} анализ:
 1. Оценка активности кошелька
-2. Текущий тренд TON рынка (основываясь на общих знаниях)
+2. Текущий тренд TON рынка
 3. Рекомендации для держателя
 
-Формат ответа:
-- Вердикт: [BULLISH/BEARISH/NEUTRAL]
-- Основной текст анализа (2-3 предложения для краткого, 5-7 для глубокого)
-"""
+ФОРМАТ ОТВЕТА:
+Начни с "Вердикт: [BULLISH/BEARISH/NEUTRAL]"
+Затем анализ ({"5-7" if deep else "2-3"} предложения)"""
 
     try:
         async with httpx.AsyncClient() as client:
@@ -137,10 +164,8 @@ async def generate_ai_analysis(wallet_address: str, wallet_info: dict, deep: boo
                 },
                 json={
                     "model": AI_MODEL,
-                    "messages": [
-                        {"role": "user", "content": prompt}
-                    ],
-                    "max_tokens": 500 if not deep else 1000,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 1000 if deep else 500,
                     "temperature": 0.7
                 },
                 timeout=30
@@ -150,110 +175,251 @@ async def generate_ai_analysis(wallet_address: str, wallet_info: dict, deep: boo
                 data = response.json()
                 ai_text = data["choices"][0]["message"]["content"]
                 
-                # Определяем сентимент из ответа
+                # Определяем сентимент
                 sentiment = "neutral"
                 if "BULLISH" in ai_text.upper():
                     sentiment = "bullish"
                 elif "BEARISH" in ai_text.upper():
                     sentiment = "bearish"
                 
-                # Формируем детали
-                details = [
-                    {"icon": "💰", "text": f"Баланс: {wallet_info.get('balance', 'N/A')} TON"},
-                    {"icon": "📈", "text": f"Статус: {wallet_info.get('status', 'active')}"},
-                ]
-                
-                if deep:
-                    details.extend([
-                        {"icon": "🔄", "text": f"Последняя активность: {wallet_info.get('last_activity', 'N/A')}"},
-                        {"icon": "💎", "text": "Премиум анализ активирован"},
-                    ])
-                
-                return {
-                    "report": ai_text,
-                    "sentiment": sentiment,
-                    "details": details
-                }
+                logger.info(f"[Node: analyze_with_ai] Success, sentiment={sentiment}")
+                return {**state, "ai_analysis": ai_text, "sentiment": sentiment}
             else:
-                raise Exception(f"OpenRouter API error: {response.status_code}")
+                logger.error(f"[Node: analyze_with_ai] OpenRouter error: {response.status_code}")
+                return {
+                    **state,
+                    "ai_analysis": f"⚠️ Ошибка AI ({response.status_code}). Баланс: {wallet_info.get('balance', 'N/A')} TON",
+                    "sentiment": "neutral"
+                }
                 
     except Exception as e:
-        print(f"AI generation error: {e}")
+        logger.error(f"[Node: analyze_with_ai] Exception: {e}")
         return {
-            "report": f"⚠️ Ошибка AI-анализа. Баланс кошелька: {wallet_info.get('balance', 'N/A')} TON. Рынок TON демонстрирует умеренную волатильность.",
-            "sentiment": "neutral",
-            "details": [
-                {"icon": "💰", "text": f"Баланс: {wallet_info.get('balance', 'N/A')} TON"},
-                {"icon": "⚠️", "text": "AI недоступен, базовый анализ"},
-            ]
+            **state,
+            "ai_analysis": f"⚠️ Ошибка AI: {str(e)}",
+            "sentiment": "neutral"
         }
+
+
+async def format_response(state: AgentState) -> AgentState:
+    """
+    Узел 3: Форматирование финального ответа
+    """
+    logger.info("[Node: format_response] Formatting final response")
+    
+    wallet_info = state.get("wallet_info") or {}
+    
+    # Формируем детали
+    details = [
+        {"icon": "💰", "text": f"Баланс: {wallet_info.get('balance', 'N/A')} TON"},
+        {"icon": "📊", "text": f"Статус: {wallet_info.get('status', 'unknown')}"},
+    ]
+    
+    if state.get("deep_mode"):
+        details.append({"icon": "💎", "text": "Премиум анализ активирован"})
+        if wallet_info.get("last_activity"):
+            details.append({"icon": "🔄", "text": f"Последняя активность: {wallet_info.get('last_activity')}"})
+    
+    if state.get("ton_api_error"):
+        details.append({"icon": "⚠️", "text": f"Предупреждение: {state['ton_api_error']}"})
+    
+    return {
+        **state,
+        "details": details,
+        "final_report": state.get("ai_analysis", "Анализ недоступен")
+    }
+
+
+def should_continue_after_fetch(state: AgentState) -> Literal["analyze", "format_error"]:
+    """
+    Условное ребро: решаем, продолжать анализ или обработать ошибку
+    Теперь всегда идём к анализу - AI может работать и без данных кошелька
+    """
+    # Всегда идём к AI анализу - он справится даже без данных о кошельке
+    logger.info(f"[Edge] Proceeding to analyze (wallet_info: {state.get('wallet_info') is not None})")
+    return "analyze"
+
+
+async def format_error(state: AgentState) -> AgentState:
+    """
+    Узел обработки ошибок TON API
+    """
+    logger.info("[Node: format_error] Handling TON API error")
+    
+    error_msg = state.get("ton_api_error", "Unknown error")
+    
+    return {
+        **state,
+        "ai_analysis": f"⚠️ Не удалось получить данные кошелька: {error_msg}. Проверьте адрес.",
+        "sentiment": "neutral",
+        "details": [
+            {"icon": "❌", "text": f"Ошибка: {error_msg}"},
+            {"icon": "💡", "text": "Проверьте корректность адреса кошелька"}
+        ],
+        "final_report": "Анализ невозможен из-за ошибки API"
+    }
+
+
+# ============ СБОРКА ГРАФА ============
+
+def build_analysis_graph():
+    """
+    Строим LangGraph с узлами и ребрами
+    """
+    workflow = StateGraph(AgentState)
+    
+    # Добавляем узлы
+    workflow.add_node("fetch_wallet", fetch_wallet_info)
+    workflow.add_node("analyze", analyze_with_ai)
+    workflow.add_node("format_response", format_response)
+    workflow.add_node("format_error", format_error)
+    
+    # Устанавливаем точку входа
+    workflow.set_entry_point("fetch_wallet")
+    
+    # Условное ребро после получения данных кошелька
+    workflow.add_conditional_edges(
+        "fetch_wallet",
+        should_continue_after_fetch,
+        {
+            "analyze": "analyze",
+            "format_error": "format_error"
+        }
+    )
+    
+    # Прямые ребра
+    workflow.add_edge("analyze", "format_response")
+    workflow.add_edge("format_response", END)
+    workflow.add_edge("format_error", END)
+    
+    return workflow.compile()
+
+
+# Компилируем граф один раз при старте
+analysis_graph = build_analysis_graph()
+
+# Логируем структуру графа
+logger.info("=== LangGraph Structure ===")
+try:
+    mermaid_code = analysis_graph.get_graph().draw_mermaid()
+    logger.info(f"Mermaid diagram:\n{mermaid_code}")
+except Exception as e:
+    logger.warning(f"Could not generate Mermaid diagram: {e}")
+
+
+# ============ API ENDPOINTS ============
+
+class AnalysisReport(BaseModel):
+    status: str
+    report: str
+    sentiment: str
+    details: list[dict] = []
+    wallet_info: dict | None = None
+    timestamp: str
+    graph_path: list[str] = []  # Показывает путь через граф
 
 
 @app.get("/")
 async def root():
     return {
         "message": "AI Pulse TON API",
-        "version": "1.0.0",
+        "version": "2.0.0 (LangGraph)",
         "endpoints": {
             "analyze": "/api/analyze/{wallet_address}",
-            "deep_analyze": "/api/deep-analyze/{wallet_address}"
+            "deep_analyze": "/api/deep-analyze/{wallet_address}",
+            "graph": "/api/graph"
         }
     }
 
 
+@app.get("/api/graph")
+async def get_graph():
+    """Возвращает Mermaid диаграмму графа"""
+    try:
+        mermaid = analysis_graph.get_graph().draw_mermaid()
+        return {"mermaid": mermaid}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/api/analyze/{wallet_address}", response_model=AnalysisReport)
 async def analyze_wallet(wallet_address: str):
-    """
-    Бесплатный AI-анализ кошелька и TON экосистемы
-    """
-    # Валидация адреса (базовая)
+    """Бесплатный AI-анализ через LangGraph"""
+    
     if len(wallet_address) < 48:
         raise HTTPException(status_code=400, detail="Некорректный адрес кошелька")
     
-    # Получаем информацию о кошельке
-    wallet_info = await get_wallet_info(wallet_address)
+    logger.info(f"[API] Starting analysis for: {wallet_address[:20]}...")
     
-    # Генерируем AI анализ
-    analysis = await generate_ai_analysis(wallet_address, wallet_info, deep=False)
+    # Начальное состояние
+    initial_state: AgentState = {
+        "wallet_address": wallet_address,
+        "wallet_info": None,
+        "ton_api_error": None,
+        "ai_analysis": None,
+        "sentiment": "neutral",
+        "details": [],
+        "deep_mode": False,
+        "final_report": None
+    }
+    
+    # Запускаем граф
+    result = await analysis_graph.ainvoke(initial_state)
+    
+    logger.info(f"[API] Analysis complete, sentiment: {result['sentiment']}")
     
     return AnalysisReport(
         status="success",
-        report=analysis["report"],
-        sentiment=analysis["sentiment"],
-        details=analysis["details"],
-        wallet_info=wallet_info,
-        timestamp=datetime.now().isoformat()
+        report=result["final_report"] or result["ai_analysis"],
+        sentiment=result["sentiment"],
+        details=result["details"],
+        wallet_info=result["wallet_info"],
+        timestamp=datetime.now().isoformat(),
+        graph_path=["fetch_wallet", "analyze" if not result.get("ton_api_error") else "format_error", "format_response"]
     )
 
 
 @app.get("/api/deep-analyze/{wallet_address}", response_model=AnalysisReport)
 async def deep_analyze_wallet(wallet_address: str):
-    """
-    Глубокий AI-анализ (премиум, требует оплаты 0.1 TON)
-    В будущем здесь будет проверка транзакции оплаты
-    """
+    """Глубокий AI-анализ (премиум)"""
+    
     if len(wallet_address) < 48:
         raise HTTPException(status_code=400, detail="Некорректный адрес кошелька")
     
-    # TODO: Проверка транзакции оплаты через TonCenter API
-    # Пока просто генерируем глубокий анализ
+    logger.info(f"[API] Starting DEEP analysis for: {wallet_address[:20]}...")
     
-    wallet_info = await get_wallet_info(wallet_address)
-    analysis = await generate_ai_analysis(wallet_address, wallet_info, deep=True)
+    initial_state: AgentState = {
+        "wallet_address": wallet_address,
+        "wallet_info": None,
+        "ton_api_error": None,
+        "ai_analysis": None,
+        "sentiment": "neutral",
+        "details": [],
+        "deep_mode": True,  # Включаем глубокий режим
+        "final_report": None
+    }
+    
+    result = await analysis_graph.ainvoke(initial_state)
     
     return AnalysisReport(
         status="success",
-        report=analysis["report"],
-        sentiment=analysis["sentiment"],
-        details=analysis["details"],
-        wallet_info=wallet_info,
-        timestamp=datetime.now().isoformat()
+        report=result["final_report"] or result["ai_analysis"],
+        sentiment=result["sentiment"],
+        details=result["details"],
+        wallet_info=result["wallet_info"],
+        timestamp=datetime.now().isoformat(),
+        graph_path=["fetch_wallet", "analyze", "format_response"]
     )
 
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+    return {
+        "status": "healthy",
+        "langgraph": "active",
+        "model": AI_MODEL,
+        "timestamp": datetime.now().isoformat()
+    }
 
 
 if __name__ == "__main__":
