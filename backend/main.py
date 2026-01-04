@@ -71,36 +71,32 @@ class AgentState(TypedDict):
 
 async def fetch_wallet_info(state: AgentState) -> AgentState:
     """
-    Узел 1: Получение информации о кошельке через TON API
+    Узел 1: Получение информации о кошельке через TON API (tonapi.io testnet)
     """
     wallet_address = state["wallet_address"]
     logger.info(f"[Node: fetch_wallet_info] Fetching info for wallet: {wallet_address[:20]}...")
     
     try:
         async with httpx.AsyncClient() as client:
-            url = "https://testnet.toncenter.com/api/v2/getAddressInformation"
-            params = {"address": wallet_address}
+            # Используем tonapi.io testnet - бесплатный без ключа
+            url = f"https://testnet.tonapi.io/v2/accounts/{wallet_address}"
             
-            if TONCENTER_API_KEY:
-                params["api_key"] = TONCENTER_API_KEY
-            
-            response = await client.get(url, params=params, timeout=10)
+            response = await client.get(url, timeout=10)
             
             if response.status_code == 200:
                 data = response.json()
-                if data.get("ok"):
-                    result = data.get("result", {})
-                    balance_nano = int(result.get("balance", 0))
-                    balance_ton = balance_nano / 1e9
-                    
-                    wallet_info = {
-                        "balance": round(balance_ton, 4),
-                        "status": result.get("state", "unknown"),
-                        "last_activity": result.get("last_transaction_lt", "N/A")
-                    }
-                    
-                    logger.info(f"[Node: fetch_wallet_info] Success: balance={balance_ton} TON")
-                    return {**state, "wallet_info": wallet_info, "ton_api_error": None}
+                # tonapi возвращает баланс в наноТОН
+                balance_nano = int(data.get("balance", 0))
+                balance_ton = balance_nano / 1e9
+                
+                wallet_info = {
+                    "balance": round(balance_ton, 4),
+                    "status": data.get("status", "unknown"),
+                    "last_activity": data.get("last_activity", "N/A")
+                }
+                
+                logger.info(f"[Node: fetch_wallet_info] Success: balance={balance_ton} TON, status={wallet_info['status']}")
+                return {**state, "wallet_info": wallet_info, "ton_api_error": None}
             
             logger.warning(f"[Node: fetch_wallet_info] API returned non-200: {response.status_code}")
             return {**state, "wallet_info": None, "ton_api_error": f"API error: {response.status_code}"}
