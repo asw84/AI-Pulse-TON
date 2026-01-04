@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: ai-pulse-ton-backend
+    env: python
+    region: frankfurt
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: AI_MODEL
+        value: minimax/minimax-m2.1
+      - key: FRONTEND_URL
+        value: https://ai-pulse-ton.vercel.app
