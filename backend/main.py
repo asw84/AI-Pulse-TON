@@ -78,7 +78,7 @@ async def fetch_wallet_info(state: AgentState) -> AgentState:
     
     try:
         async with httpx.AsyncClient() as client:
-            url = "https://toncenter.com/api/v2/getAddressInformation"
+            url = "https://testnet.toncenter.com/api/v2/getAddressInformation"
             params = {"address": wallet_address}
             
             if TONCENTER_API_KEY:
