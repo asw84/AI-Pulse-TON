@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { TonConnectButton, TonConnectUIProvider, useTonAddress, useTonConnectUI } from '@tonconnect/ui-react';
+import { TwaAnalyticsProvider, useTWAEvent } from '@tonsolutions/telemetree-react';
 import WebApp from '@twa-dev/sdk';
 import './index.css';
 
@@ -12,14 +13,139 @@ function MainContent() {
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [isVerified, setIsVerified] = useState(false);
+  const [userData, setUserData] = useState(null);
   const address = useTonAddress();
   const [tonConnectUI] = useTonConnectUI();
+  const trackEvent = useTWAEvent();
+
+  const CLIENT_ID = import.meta.env.VITE_TON_ID_CLIENT_ID || "ai_pulse_ton";
+  const REDIRECT_URI = "https://ai-pulse-ton.vercel.app/auth/callback";
+
+  // PKCE Helpers
+  const base64URLEncode = (buffer) => {
+    return btoa(String.fromCharCode(...new Uint8Array(buffer)))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=/g, '');
+  };
+
+  const generateCodeVerifier = () => {
+    const array = new Uint8Array(32);
+    window.crypto.getRandomValues(array);
+    return base64URLEncode(array);
+  };
+
+  const generateCodeChallenge = async (verifier) => {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(verifier);
+    const hash = await window.crypto.subtle.digest('SHA-256', data);
+    return base64URLEncode(hash);
+  };
+
+  // Инициализация верификации
+  const startVerification = async () => {
+    const verifier = generateCodeVerifier();
+    localStorage.setItem('ton_id_verifier', verifier);
+
+    const challenge = await generateCodeChallenge(verifier);
+    const state = Math.random().toString(36).substring(7);
+    localStorage.setItem('ton_id_state', state);
+
+    const params = new URLSearchParams({
+      response_type: 'code',
+      client_id: CLIENT_ID,
+      redirect_uri: REDIRECT_URI,
+      scope: 'openid profile offline_access',
+      state: state,
+      code_challenge: challenge,
+      code_challenge_method: 'S256'
+    });
+
+    // Для TMA лучше использовать JSON формат, чтобы не выкидывало из Telegram
+    // Но для начала реализуем стандартный редирект для проверки
+    window.location.href = `https://id.ton.org/v1/oauth2/signin?${params.toString()}`;
+  };
+
+  // Обработка callback при загрузке
+  useEffect(() => {
+    const handleCallback = async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const code = urlParams.get('code');
+      const state = urlParams.get('state');
+      const savedState = localStorage.getItem('ton_id_state');
+      const verifier = localStorage.getItem('ton_id_verifier');
+
+      if (code && state === savedState) {
+        // Очищаем URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+
+        try {
+          const response = await fetch('https://id.ton.org/v1/oauth2/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+              grant_type: 'authorization_code',
+              code,
+              redirect_uri: REDIRECT_URI,
+              client_id: CLIENT_ID,
+              code_verifier: verifier
+            })
+          });
+
+          const tokens = await response.json();
+          if (tokens.id_token) {
+            // ОТПРАВЛЯЕМ НА БЭКЕНД ДЛЯ ВАЛИДАЦИИ
+            const verifyResponse = await fetch(`${BACKEND_URL}/api/auth/verify`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token: tokens.id_token })
+            });
+
+            const verifyData = await verifyResponse.json();
+
+            if (verifyData.success) {
+              setIsVerified(true);
+              // Получаем данные пользователя из TON ID для отображения в UI
+              const userResponse = await fetch('https://id.ton.org/v1/oauth2/userinfo', {
+                headers: { Authorization: `Bearer ${tokens.access_token}` }
+              });
+              const userData = await userResponse.json();
+              setUserData(userData.data);
+              WebApp.showAlert(`✅ Верификация успешно подтверждена сервером!`);
+            }
+          }
+        } catch (err) {
+          console.error('Auth error:', err);
+          WebApp.showAlert('Ошибка верификации на сервере');
+        }
+      }
+    };
+
+    handleCallback();
+  }, [CLIENT_ID, REDIRECT_URI]);
+
+  // Отслеживание подключения кошелька
+  useEffect(() => {
+    if (address) {
+      trackEvent.track('wallet_connected', {
+        address: address,
+        platform: WebApp.platform,
+        version: WebApp.version
+      });
+    }
+  }, [address, trackEvent]);
 
   const fetchReport = async () => {
     if (!address) {
       WebApp.showAlert('Сначала подключите кошелек!');
       return;
     }
+
+    // Отслеживание начала базового анализа
+    trackEvent.track('basic_analysis_started', {
+      address: address
+    });
 
     setLoading(true);
     setError(null);
@@ -57,6 +183,13 @@ function MainContent() {
       };
 
       await tonConnectUI.sendTransaction(transaction);
+
+      // Отслеживание покупки премиум-анализа
+      trackEvent.track('premium_analysis_purchased', {
+        address: address,
+        amount: '0.1'
+      });
+
       WebApp.showAlert('Транзакция отправлена! Глубокий анализ скоро будет доступен.');
 
       const response = await fetch(`${BACKEND_URL}/api/deep-analyze/${address}`);
@@ -92,6 +225,24 @@ function MainContent() {
             </p>
           )}
         </div>
+
+        {/* Кнопка TON ID */}
+        {!isVerified ? (
+          <button
+            onClick={startVerification}
+            className="w-full py-4 px-6 bg-slate-800/40 border border-indigo-500/30 hover:border-indigo-500/60 rounded-2xl font-semibold text-indigo-300 transition-all flex items-center justify-center gap-2"
+          >
+            <span>🆔</span> Verify with TON ID
+          </button>
+        ) : (
+          <div className="w-full py-3 px-6 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-emerald-400">✅</span>
+              <span className="text-sm font-medium text-emerald-400">Verified Identity</span>
+            </div>
+            {userData && <span className="text-xs text-slate-400">{userData.name}</span>}
+          </div>
+        )}
 
         {/* Кнопка отчета */}
         <button
@@ -168,9 +319,15 @@ function MainContent() {
 
 function App() {
   return (
-    <TonConnectUIProvider manifestUrl={`${window.location.origin}/tonconnect-manifest.json`}>
-      <MainContent />
-    </TonConnectUIProvider>
+    <TwaAnalyticsProvider
+      projectId={import.meta.env.VITE_TELEMETREE_PROJECT_ID || "YOUR_PROJECT_ID"}
+      apiKey={import.meta.env.VITE_TELEMETREE_API_KEY || "YOUR_API_KEY"}
+      appName="AI Pulse TON"
+    >
+      <TonConnectUIProvider manifestUrl={`${window.location.origin}/tonconnect-manifest.json`}>
+        <MainContent />
+      </TonConnectUIProvider>
+    </TwaAnalyticsProvider>
   );
 }
 

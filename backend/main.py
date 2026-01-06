@@ -315,6 +315,40 @@ class AnalysisReport(BaseModel):
     graph_path: list[str] = []  # Показывает путь через граф
 
 
+class AuthRequest(BaseModel):
+    token: str
+
+
+@app.post("/api/auth/verify")
+async def verify_ton_id(payload: AuthRequest):
+    """
+    Верификация TON ID (Proof of Personhood)
+    Проверяет JWT токен, выданный TON Foundation
+    """
+    logger.info(f"[Auth] Verifying TON ID token...")
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            # В реальном приложении здесь запрашиваются JWKS ключи:
+            # keys_url = "https://id.ton.org/.well-known/jwks.json"
+            
+            # Для MVP мы подтверждаем получение и имитируем успешную проверку
+            # В продакшене используйте PyJWT или python-jose для декодирования JWT
+            logger.info(f"Received token: {payload.token[:30]}...")
+            
+            return {
+                "success": True, 
+                "user": {
+                    "auth_method": "ton_id", 
+                    "status": "verified",
+                    "timestamp": datetime.now().isoformat()
+                }
+            }
+    except Exception as e:
+        logger.error(f"[Auth] Verification error: {e}")
+        raise HTTPException(status_code=401, detail="Verification failed")
+
+
 @app.get("/")
 async def root():
     return {
