@@ -230,15 +230,16 @@ function MainContent() {
         {!isVerified ? (
           <button
             onClick={startVerification}
-            className="w-full py-4 px-6 bg-slate-800/40 border border-indigo-500/30 hover:border-indigo-500/60 rounded-2xl font-semibold text-indigo-300 transition-all flex items-center justify-center gap-2"
+            style={{ backgroundColor: 'rgba(79, 70, 229, 0.2)', border: '1px solid rgba(99, 102, 241, 0.5)' }}
+            className="w-full py-4 px-6 rounded-2xl font-bold text-indigo-400 transition-all flex items-center justify-center gap-2 hover:bg-indigo-500/20 active:scale-[0.98]"
           >
-            <span>🆔</span> Verify with TON ID
+            <span>🆔</span> Подтвердить личность (TON ID)
           </button>
         ) : (
-          <div className="w-full py-3 px-6 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl flex items-center justify-between">
+          <div className="w-full py-3 px-6 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl flex items-center justify-between animate-pulse">
             <div className="flex items-center gap-2">
               <span className="text-emerald-400">✅</span>
-              <span className="text-sm font-medium text-emerald-400">Verified Identity</span>
+              <span className="text-sm font-medium text-emerald-400">Личность подтверждена</span>
             </div>
             {userData && <span className="text-xs text-slate-400">{userData.name}</span>}
           </div>
