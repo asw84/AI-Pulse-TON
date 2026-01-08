@@ -10,16 +10,44 @@ WebApp.ready();
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 const TG_ANALYTICS_TOKEN = import.meta.env.VITE_TG_ANALYTICS_TOKEN || '';
 
-// Инициализация TG Analytics (глобально)
-if (typeof window !== 'undefined' && window.tgAnalytics && TG_ANALYTICS_TOKEN) {
-  window.tgAnalytics.init({
-    token: TG_ANALYTICS_TOKEN,
-    appName: 'ai_pulse_ton',
-  });
-  console.log('TG Analytics Initialized! 🚀');
-}
-
 function MainContent() {
+  // Состояние для отслеживания инициализации TG Analytics
+  const [tgAnalyticsReady, setTgAnalyticsReady] = useState(false);
+
+  // Инициализация TG Analytics с ожиданием загрузки SDK
+  useEffect(() => {
+    const initTgAnalytics = () => {
+      if (window.tgAnalytics && TG_ANALYTICS_TOKEN) {
+        window.tgAnalytics.init({
+          token: TG_ANALYTICS_TOKEN,
+          appName: 'ai_pulse_ton',
+        });
+        console.log('TG Analytics Initialized! 🚀');
+        console.log('Token:', TG_ANALYTICS_TOKEN.substring(0, 20) + '...');
+        setTgAnalyticsReady(true);
+        return true;
+      }
+      return false;
+    };
+
+    // Если уже загружен — инициализируем сразу
+    if (initTgAnalytics()) return;
+
+    // Иначе ждём загрузку скрипта (проверяем каждые 100ms, максимум 5 секунд)
+    let attempts = 0;
+    const maxAttempts = 50;
+    const interval = setInterval(() => {
+      attempts++;
+      if (initTgAnalytics() || attempts >= maxAttempts) {
+        clearInterval(interval);
+        if (attempts >= maxAttempts) {
+          console.warn('TG Analytics SDK not loaded after 5 seconds');
+        }
+      }
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, []);
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
