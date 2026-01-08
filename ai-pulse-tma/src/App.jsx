@@ -41,7 +41,7 @@ function MainContent() {
 
     if (!script) {
       script = document.createElement('script');
-      script.src = 'https://tganalytics.xyz/index.js';
+      script.src = '/tg-analytics.js'; // Теперь берем локальную копию
       script.type = 'text/javascript';
       script.async = true;
       document.head.appendChild(script);
