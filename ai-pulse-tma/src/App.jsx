@@ -335,8 +335,12 @@ function MainContent() {
         )}
       </main>
 
-      <footer className="mt-auto pt-10 text-slate-500 text-[10px] uppercase tracking-[2px] z-10">
-        Powered by AI & TON Blockchain
+      <footer className="mt-auto pt-10 text-slate-500 text-[10px] uppercase tracking-[2px] z-10 flex flex-col items-center gap-2">
+        <span>Powered by AI & TON Blockchain</span>
+        <div className="flex items-center gap-1.5 normal-case tracking-normal">
+          <div className={`w-1.5 h-1.5 rounded-full ${tgAnalyticsReady ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-slate-600'}`}></div>
+          <span className="text-[9px]">{tgAnalyticsReady ? 'TG Analytics Active' : 'TG Analytics Connecting...'}</span>
+        </div>
       </footer>
     </div>
   );
