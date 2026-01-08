@@ -14,11 +14,13 @@ function MainContent() {
   // Состояние для отслеживания инициализации TG Analytics
   const [tgAnalyticsReady, setTgAnalyticsReady] = useState(false);
 
-  // Инициализация TG Analytics с динамической загрузкой скрипта
+  // Инициализация TG Analytics
   useEffect(() => {
     const initAnalytics = () => {
-      if (window.tgAnalytics && TG_ANALYTICS_TOKEN) {
-        window.tgAnalytics.init({
+      // Имя объекта в глобальном пространстве может быть tgAnalytics или telegramAnalytics
+      const sdk = window.tgAnalytics || window.telegramAnalytics;
+      if (sdk && TG_ANALYTICS_TOKEN) {
+        sdk.init({
           token: TG_ANALYTICS_TOKEN,
           project_name: 'ai_pulse_ton',
           refresh_rate: 10000,
@@ -30,40 +32,22 @@ function MainContent() {
       return false;
     };
 
-    // Если скрипт уже есть
-    if (window.tgAnalytics) {
-      initAnalytics();
-      return;
-    }
+    // Проверяем сразу и потом по интервалу
+    if (initAnalytics()) return;
 
-    // Если скрипта нет, пробуем найти его в DOM или создать
-    let script = document.querySelector('script[src*="tganalytics.xyz"]');
-
-    if (!script) {
-      script = document.createElement('script');
-      script.src = '/tg-analytics.js'; // Теперь берем локальную копию
-      script.type = 'text/javascript';
-      script.async = true;
-      document.head.appendChild(script);
-    }
-
-    script.onload = () => {
-      console.log('TG Analytics SDK Loaded via Dynamic Script');
-      initAnalytics();
-    };
-
-    script.onerror = () => {
-      console.error('Failed to load TG Analytics SDK');
-    };
-
-    // Запасной интервал на случай, если onload не сработает (некоторые браузеры капризничают)
     const interval = setInterval(() => {
       if (initAnalytics()) {
         clearInterval(interval);
       }
-    }, 500);
+    }, 1000);
 
-    return () => clearInterval(interval);
+    // Остановка через 10 секунд
+    const timeout = setTimeout(() => clearInterval(interval), 10000);
+
+    return () => {
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
   }, []);
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
