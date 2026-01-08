@@ -8,6 +8,16 @@ import './index.css';
 WebApp.ready();
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+const TG_ANALYTICS_TOKEN = import.meta.env.VITE_TG_ANALYTICS_TOKEN || '';
+
+// Инициализация TG Analytics (глобально)
+if (typeof window !== 'undefined' && window.tgAnalytics && TG_ANALYTICS_TOKEN) {
+  window.tgAnalytics.init({
+    token: TG_ANALYTICS_TOKEN,
+    appName: 'ai_pulse_ton',
+  });
+  console.log('TG Analytics Initialized! 🚀');
+}
 
 function MainContent() {
   const [report, setReport] = useState(null);
@@ -19,7 +29,7 @@ function MainContent() {
   const [tonConnectUI] = useTonConnectUI();
   const trackEvent = useTWAEvent();
 
-  const CLIENT_ID = import.meta.env.VITE_TON_ID_CLIENT_ID || "ai_pulse_ton";
+  const CLIENT_ID = "nPiytmRGEQGNoYAhR85q";
   const REDIRECT_URI = "https://ai-pulse-ton.vercel.app/auth/callback";
 
   // PKCE Helpers
@@ -43,87 +53,57 @@ function MainContent() {
     return base64URLEncode(hash);
   };
 
-  // Инициализация верификации
-  const startVerification = async () => {
-    const verifier = generateCodeVerifier();
-    localStorage.setItem('ton_id_verifier', verifier);
-
-    const challenge = await generateCodeChallenge(verifier);
+  // Инициализация верификации (Implicit Flow)
+  const startVerification = () => {
     const state = Math.random().toString(36).substring(7);
     localStorage.setItem('ton_id_state', state);
 
     const params = new URLSearchParams({
-      response_type: 'code',
       client_id: CLIENT_ID,
       redirect_uri: REDIRECT_URI,
-      scope: 'openid profile offline_access',
-      state: state,
-      code_challenge: challenge,
-      code_challenge_method: 'S256'
+      response_type: 'id_token',
+      scope: 'openid profile',
+      state: state
     });
 
-    // Для TMA лучше использовать JSON формат, чтобы не выкидывало из Telegram
-    // Но для начала реализуем стандартный редирект для проверки
-    window.location.href = `https://id.ton.org/v1/oauth2/signin?${params.toString()}`;
+    window.location.href = `https://oauth2.ton.org/authorize?${params.toString()}`;
   };
 
   // Обработка callback при загрузке
   useEffect(() => {
     const handleCallback = async () => {
-      const urlParams = new URLSearchParams(window.location.search);
-      const code = urlParams.get('code');
+      // TON ID присылает данные в query или hash
+      const urlParams = new URLSearchParams(window.location.search || window.location.hash.replace('#', '?'));
+      const token = urlParams.get('id_token');
       const state = urlParams.get('state');
       const savedState = localStorage.getItem('ton_id_state');
-      const verifier = localStorage.getItem('ton_id_verifier');
 
-      if (code && state === savedState) {
-        // Очищаем URL
+      if (token && state === savedState) {
         window.history.replaceState({}, document.title, window.location.pathname);
 
         try {
-          const response = await fetch('https://id.ton.org/v1/oauth2/token', {
+          const verifyResponse = await fetch(`${BACKEND_URL}/api/auth/verify`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({
-              grant_type: 'authorization_code',
-              code,
-              redirect_uri: REDIRECT_URI,
-              client_id: CLIENT_ID,
-              code_verifier: verifier
-            })
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token })
           });
 
-          const tokens = await response.json();
-          if (tokens.id_token) {
-            // ОТПРАВЛЯЕМ НА БЭКЕНД ДЛЯ ВАЛИДАЦИИ
-            const verifyResponse = await fetch(`${BACKEND_URL}/api/auth/verify`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ token: tokens.id_token })
-            });
+          const verifyData = await verifyResponse.json();
 
-            const verifyData = await verifyResponse.json();
-
-            if (verifyData.success) {
-              setIsVerified(true);
-              // Получаем данные пользователя из TON ID для отображения в UI
-              const userResponse = await fetch('https://id.ton.org/v1/oauth2/userinfo', {
-                headers: { Authorization: `Bearer ${tokens.access_token}` }
-              });
-              const userData = await userResponse.json();
-              setUserData(userData.data);
-              WebApp.showAlert(`✅ Верификация успешно подтверждена сервером!`);
-            }
+          if (verifyData.success) {
+            setIsVerified(true);
+            setUserData(verifyData.user || { name: 'Verified User' });
+            WebApp.showAlert(`✅ Личность подтверждена!`);
           }
         } catch (err) {
           console.error('Auth error:', err);
-          WebApp.showAlert('Ошибка верификации на сервере');
+          WebApp.showAlert('Ошибка подтверждения на сервере');
         }
       }
     };
 
     handleCallback();
-  }, [CLIENT_ID, REDIRECT_URI]);
+  }, [BACKEND_URL]);
 
   // Отслеживание подключения кошелька
   useEffect(() => {
@@ -142,7 +122,15 @@ function MainContent() {
       return;
     }
 
-    // Отслеживание начала базового анализа
+    // TG Analytics: трекинг клика на "Получить отчет"
+    if (window.tgAnalytics) {
+      window.tgAnalytics.track('click_get_report', {
+        wallet: address,
+        platform: 'tma'
+      });
+    }
+
+    // Отслеживание начала базового анализа (Telemetree)
     trackEvent.track('basic_analysis_started', {
       address: address
     });
@@ -169,6 +157,14 @@ function MainContent() {
     if (!address) {
       WebApp.showAlert('Сначала подключите кошелек!');
       return;
+    }
+
+    // TG Analytics: трекинг клика на "Глубокий анализ"
+    if (window.tgAnalytics) {
+      window.tgAnalytics.track('click_deep_analysis', {
+        wallet: address,
+        platform: 'tma'
+      });
     }
 
     try {
@@ -226,8 +222,8 @@ function MainContent() {
           )}
         </div>
 
-        {/* Кнопка TON ID */}
-        {!isVerified ? (
+        {/* Кнопка TON ID (Временно отключено) */}
+        {/* {!isVerified ? (
           <button
             onClick={startVerification}
             style={{ backgroundColor: 'rgba(79, 70, 229, 0.2)', border: '1px solid rgba(99, 102, 241, 0.5)' }}
@@ -243,7 +239,7 @@ function MainContent() {
             </div>
             {userData && <span className="text-xs text-slate-400">{userData.name}</span>}
           </div>
-        )}
+        )} */}
 
         {/* Кнопка отчета */}
         <button
