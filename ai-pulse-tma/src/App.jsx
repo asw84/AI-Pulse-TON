@@ -14,9 +14,9 @@ function MainContent() {
   // Состояние для отслеживания инициализации TG Analytics
   const [tgAnalyticsReady, setTgAnalyticsReady] = useState(false);
 
-  // Инициализация TG Analytics с ожиданием загрузки SDK
+  // Инициализация TG Analytics с динамической загрузкой скрипта
   useEffect(() => {
-    const initTgAnalytics = () => {
+    const initAnalytics = () => {
       if (window.tgAnalytics && TG_ANALYTICS_TOKEN) {
         window.tgAnalytics.init({
           token: TG_ANALYTICS_TOKEN,
@@ -24,28 +24,44 @@ function MainContent() {
           refresh_rate: 10000,
         });
         console.log('TG Analytics Initialized! 🚀');
-        console.log('Token:', TG_ANALYTICS_TOKEN.substring(0, 20) + '...');
         setTgAnalyticsReady(true);
         return true;
       }
       return false;
     };
 
-    // Если уже загружен — инициализируем сразу
-    if (initTgAnalytics()) return;
+    // Если скрипт уже есть
+    if (window.tgAnalytics) {
+      initAnalytics();
+      return;
+    }
 
-    // Иначе ждём загрузку скрипта (проверяем каждые 100ms, максимум 5 секунд)
-    let attempts = 0;
-    const maxAttempts = 50;
+    // Если скрипта нет, пробуем найти его в DOM или создать
+    let script = document.querySelector('script[src*="tganalytics.xyz"]');
+
+    if (!script) {
+      script = document.createElement('script');
+      script.src = 'https://tganalytics.xyz/index.js';
+      script.type = 'text/javascript';
+      script.async = true;
+      document.head.appendChild(script);
+    }
+
+    script.onload = () => {
+      console.log('TG Analytics SDK Loaded via Dynamic Script');
+      initAnalytics();
+    };
+
+    script.onerror = () => {
+      console.error('Failed to load TG Analytics SDK');
+    };
+
+    // Запасной интервал на случай, если onload не сработает (некоторые браузеры капризничают)
     const interval = setInterval(() => {
-      attempts++;
-      if (initTgAnalytics() || attempts >= maxAttempts) {
+      if (initAnalytics()) {
         clearInterval(interval);
-        if (attempts >= maxAttempts) {
-          console.warn('TG Analytics SDK not loaded after 5 seconds');
-        }
       }
-    }, 100);
+    }, 500);
 
     return () => clearInterval(interval);
   }, []);
