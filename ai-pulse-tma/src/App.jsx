@@ -11,14 +11,51 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 const TG_ANALYTICS_TOKEN = import.meta.env.VITE_TG_ANALYTICS_TOKEN || '';
 const CLIENT_ID = import.meta.env.VITE_TON_ID_CLIENT_ID || 'nPiytmRGEQGNoYAhR85q';
 
-function WelcomePage() {
-  const handleTonIdLogin = () => {
-    // Используем backend URL для колбэка, чтобы он мог обменять код на токен
-    const redirectUri = encodeURIComponent(`${BACKEND_URL}/api/auth/callback`);
-    const scope = 'tg_id+wallet';
-    const authUrl = `https://oauth2.ton.org/authorize?client_id=${CLIENT_ID}&redirect_uri=${redirectUri}&scope=${scope}&response_type=code`;
+// PKCE Helpers
+const base64URLEncode = (buffer) => {
+  return btoa(String.fromCharCode(...new Uint8Array(buffer)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
+};
 
-    window.location.href = authUrl;
+const generateCodeVerifier = () => {
+  const array = new Uint8Array(32);
+  window.crypto.getRandomValues(array);
+  return base64URLEncode(array);
+};
+
+const generateCodeChallenge = async (verifier) => {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(verifier);
+  const hash = await window.crypto.subtle.digest('SHA-256', data);
+  return base64URLEncode(hash);
+};
+
+function WelcomePage() {
+  const handleTonIdLogin = async () => {
+    const verifier = generateCodeVerifier();
+    const challenge = await generateCodeChallenge(verifier);
+    const state = Math.random().toString(36).substring(7);
+
+    localStorage.setItem('ton_id_verifier', verifier);
+    localStorage.setItem('ton_id_state', state);
+
+    // Теперь используем фронтенд как redirect_uri для PKCE flow
+    const redirectUri = `${window.location.origin}/auth/callback`;
+    const scope = 'openid profile wallet';
+
+    const params = new URLSearchParams({
+      response_type: 'code',
+      client_id: CLIENT_ID,
+      redirect_uri: redirectUri,
+      scope: scope,
+      state: state,
+      code_challenge: challenge,
+      code_challenge_method: 'S256'
+    });
+
+    window.location.href = `https://id.ton.org/v1/oauth2/signin?${params.toString()}`;
   };
 
   return (
@@ -245,15 +282,58 @@ function MainContent() {
 
 function App() {
   const [authToken, setAuthToken] = useState(localStorage.getItem('auth_token'));
+  const [authError, setAuthError] = useState(null);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const token = params.get('token');
-    if (token) {
-      localStorage.setItem('auth_token', token);
-      setAuthToken(token);
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
+    const handleAuth = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get('code');
+      const state = params.get('state');
+      const savedState = localStorage.getItem('ton_id_state');
+      const verifier = localStorage.getItem('ton_id_verifier');
+
+      // Если в URL есть прямой токен (от бэкенда при редиректе)
+      const token = params.get('token');
+      if (token) {
+        localStorage.setItem('auth_token', token);
+        setAuthToken(token);
+        window.history.replaceState({}, document.title, window.location.pathname);
+        return;
+      }
+
+      // Если в URL есть код (прямой колбэк от TON ID на фронтенд)
+      if (code && state === savedState && verifier) {
+        try {
+          // Очищаем временные данные
+          localStorage.removeItem('ton_id_state');
+          localStorage.removeItem('ton_id_verifier');
+          window.history.replaceState({}, document.title, window.location.pathname);
+
+          const response = await fetch(`${BACKEND_URL}/api/auth/exchange`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              code,
+              code_verifier: verifier,
+              redirect_uri: `${window.location.origin}/auth/callback`
+            })
+          });
+
+          if (!response.ok) throw new Error('Failed to exchange code');
+
+          const data = await response.json();
+          if (data.access_token) {
+            localStorage.setItem('auth_token', data.access_token);
+            setAuthToken(data.access_token);
+          }
+        } catch (err) {
+          console.error('Auth exchange error:', err);
+          setAuthError(err.message);
+        }
+      }
+    };
+
+    handleAuth();
   }, []);
 
   return (
