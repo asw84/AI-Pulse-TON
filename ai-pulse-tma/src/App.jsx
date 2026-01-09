@@ -42,7 +42,7 @@ function WelcomePage() {
     localStorage.setItem('ton_id_state', state);
 
     const redirectUri = 'https://ai-pulse-ton.vercel.app/auth/callback';
-    const scope = 'openid profile';
+    const scope = 'openid profile offline_access';
 
     const params = new URLSearchParams();
     params.append('response_type', 'code');
@@ -52,19 +52,10 @@ function WelcomePage() {
     params.append('state', state);
     params.append('code_challenge', challenge);
     params.append('code_challenge_method', 'S256');
-    params.append('response_format', 'json');
 
-    try {
-      const response = await fetch(`https://id.ton.org/v1/oauth2/signin?${params.toString()}`);
-      const result = await response.json();
-      if (result.status === 'success' && result.data?.url) {
-        WebApp.openTelegramLink(result.data.url);
-      } else {
-        throw new Error(result.message || 'Error getting auth link');
-      }
-    } catch (err) {
-      WebApp.showAlert('Auth Error: ' + err.message);
-    }
+    // Прямой редирект на эндпоинт авторизации, как указано в п.2 документации
+    const authUrl = `https://id.ton.org/v1/oauth2/signin?${params.toString()}`;
+    window.location.href = authUrl;
   };
 
   return (
