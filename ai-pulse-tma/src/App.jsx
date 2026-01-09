@@ -41,10 +41,9 @@ function WelcomePage() {
     localStorage.setItem('ton_id_verifier', verifier);
     localStorage.setItem('ton_id_state', state);
 
-    // Теперь используем фронтенд как redirect_uri для PKCE flow
-    // ВАЖНО: Этот URL должен быть в белом списке в TON Builders!
-    const redirectUri = window.location.origin + '/auth/callback';
-    const scope = 'openid profile offline_access';
+    // ВАЖНО: Этот URL должен БУКВА В БУКВУ совпадать с тем, что в TON Builders!
+    const redirectUri = 'https://ai-pulse-ton.vercel.app/auth/callback';
+    const scope = 'openid profile';
 
     const params = new URLSearchParams();
     params.append('response_type', 'code');
