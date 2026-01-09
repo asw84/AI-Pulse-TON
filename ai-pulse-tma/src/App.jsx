@@ -16,7 +16,7 @@ function WelcomePage() {
     // Используем backend URL для колбэка, чтобы он мог обменять код на токен
     const redirectUri = encodeURIComponent(`${BACKEND_URL}/api/auth/callback`);
     const scope = 'tg_id+wallet';
-    const authUrl = `https://oauth.ton.org/authorize?client_id=${CLIENT_ID}&redirect_uri=${redirectUri}&scope=${scope}&response_type=code`;
+    const authUrl = `https://oauth2.ton.org/authorize?client_id=${CLIENT_ID}&redirect_uri=${redirectUri}&scope=${scope}&response_type=code`;
 
     window.location.href = authUrl;
   };
@@ -216,8 +216,8 @@ function MainContent() {
           <div className="bg-slate-800/40 backdrop-blur-xl border border-slate-700/50 p-6 rounded-3xl shadow-xl animate-[fadeIn_0.3s_ease-out]">
             <h2 className="text-lg font-bold mb-4 flex items-center gap-2">📊 AI Вердикт</h2>
             <div className={`inline-flex items-center px-3 py-1.5 rounded-full text-sm font-semibold mb-4 ${report.sentiment === 'bullish' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
-                report.sentiment === 'bearish' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
-                  'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+              report.sentiment === 'bearish' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                'bg-amber-500/20 text-amber-400 border border-amber-500/30'
               }`}>
               {report.sentiment === 'bullish' ? '🚀 Bullish' : report.sentiment === 'bearish' ? '📉 Bearish' : '⚖️ Neutral'}
             </div>
