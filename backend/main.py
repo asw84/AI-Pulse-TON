@@ -5,7 +5,8 @@ AI Pulse TON - FastAPI Backend с полноценным LangGraph
 import os
 import logging
 from typing import TypedDict, Annotated, Literal
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -347,6 +348,45 @@ async def verify_ton_id(payload: AuthRequest):
     except Exception as e:
         logger.error(f"[Auth] Verification error: {e}")
         raise HTTPException(status_code=401, detail="Verification failed")
+
+
+@app.get("/api/auth/callback")
+async def auth_callback(code: str):
+    """
+    TON ID Callback handler
+    Обменивает code на access_token и данные пользователя
+    """
+    logger.info(f"[Auth] Received callback with code: {code[:10]}...")
+    
+    clientId = "nPiytmRGEQGNoYAhR85q"
+    # Рекомендуется хранить секрет в .env
+    clientSecret = os.getenv("TON_ID_SECRET", "") 
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post("https://oauth.ton.org/token", data={
+                "client_id": clientId,
+                "client_secret": clientSecret,
+                "code": code,
+                "grant_type": "authorization_code"
+            })
+            
+            if response.status_code != 200:
+                logger.error(f"[Auth] Token exchange failed: {response.text}")
+                return RedirectResponse(url=f"{FRONTEND_URL}/?error=auth_failed")
+                
+            data = response.json()
+            logger.info(f"[Auth] Successfully exchanged code for token")
+            
+            # Тут придут подтвержденные TG ID и адрес кошелька
+            # data['access_token'], data.get('id_token'), etc.
+            
+            # Перенаправляем пользователя на фронтенд с токеном
+            return RedirectResponse(url=f"{FRONTEND_URL}/?token={data.get('access_token')}")
+            
+        except Exception as e:
+            logger.error(f"[Auth] Callback error: {e}")
+            return RedirectResponse(url=f"{FRONTEND_URL}/?error=server_error")
 
 
 @app.get("/")

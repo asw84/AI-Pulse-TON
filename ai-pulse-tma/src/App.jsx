@@ -9,15 +9,75 @@ WebApp.ready();
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 const TG_ANALYTICS_TOKEN = import.meta.env.VITE_TG_ANALYTICS_TOKEN || '';
+const CLIENT_ID = import.meta.env.VITE_TON_ID_CLIENT_ID || 'nPiytmRGEQGNoYAhR85q';
+
+function WelcomePage() {
+  const handleTonIdLogin = () => {
+    // Используем backend URL для колбэка, чтобы он мог обменять код на токен
+    const redirectUri = encodeURIComponent(`${BACKEND_URL}/api/auth/callback`);
+    const scope = 'tg_id+wallet';
+    const authUrl = `https://oauth.ton.org/authorize?client_id=${CLIENT_ID}&redirect_uri=${redirectUri}&scope=${scope}&response_type=code`;
+
+    window.location.href = authUrl;
+  };
+
+  return (
+    <div className="min-h-screen bg-[#0f172a] text-white flex flex-col items-center justify-center p-6 font-sans relative overflow-hidden">
+      {/* Декоративные фоновые элементы */}
+      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-500/10 blur-[120px] rounded-full pointer-events-none"></div>
+      <div className="absolute bottom-[-10%] right-[-10%] w-[30%] h-[30%] bg-cyan-500/10 blur-[100px] rounded-full pointer-events-none"></div>
+
+      <div className="z-10 text-center space-y-10 max-w-sm">
+        <div className="flex flex-col items-center space-y-6">
+          {/* Логотип */}
+          <div className="w-24 h-24 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-[2.5rem] flex items-center justify-center shadow-2xl shadow-cyan-500/20 rotate-12 transition-transform hover:rotate-0 duration-500 cursor-default">
+            <span className="text-4xl">⚡</span>
+          </div>
+
+          <div className="space-y-3">
+            <h1 className="text-5xl font-black bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">
+              AI Pulse TON
+            </h1>
+            <p className="text-lg text-slate-400 font-medium leading-relaxed">
+              Autonomous AI Agents for your TON Portfolio
+            </p>
+          </div>
+        </div>
+
+        {/* Кнопка входа */}
+        <button
+          onClick={handleTonIdLogin}
+          className="group relative w-full py-5 px-8 bg-[#0098EA] hover:bg-[#0087d1] rounded-2xl font-bold text-lg shadow-[0_0_30px_rgba(0,152,234,0.3)] transition-all active:scale-[0.98] flex items-center justify-center gap-3"
+        >
+          <img
+            src="https://ton.org/download/ton_symbol.svg"
+            alt="TON"
+            className="w-6 h-6 group-hover:rotate-12 transition-transform"
+          />
+          Sign in with TON ID
+        </button>
+
+        <p className="text-[10px] text-slate-500 uppercase tracking-[0.2em] font-bold pt-4">
+          Secure • Fast • Decentralized
+        </p>
+      </div>
+    </div>
+  );
+}
 
 function MainContent() {
-  // Состояние для отслеживания инициализации TG Analytics
+  const [report, setReport] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [tgAnalyticsReady, setTgAnalyticsReady] = useState(false);
 
-  // Инициализация TG Analytics
+  const address = useTonAddress();
+  const [tonConnectUI] = useTonConnectUI();
+  const trackEvent = useTWAEvent();
+
+  // Инициализация аналитики
   useEffect(() => {
     const initAnalytics = () => {
-      // Имя объекта в глобальном пространстве может быть tgAnalytics или telegramAnalytics
       const sdk = window.tgAnalytics || window.telegramAnalytics;
       if (sdk && TG_ANALYTICS_TOKEN) {
         sdk.init({
@@ -25,125 +85,22 @@ function MainContent() {
           project_name: 'ai_pulse_ton',
           refresh_rate: 10000,
         });
-        console.log('TG Analytics Initialized! 🚀');
         setTgAnalyticsReady(true);
         return true;
       }
       return false;
     };
 
-    // Проверяем сразу и потом по интервалу
     if (initAnalytics()) return;
-
     const interval = setInterval(() => {
-      if (initAnalytics()) {
-        clearInterval(interval);
-      }
+      if (initAnalytics()) clearInterval(interval);
     }, 1000);
-
-    // Остановка через 10 секунд
     const timeout = setTimeout(() => clearInterval(interval), 10000);
-
     return () => {
       clearInterval(interval);
       clearTimeout(timeout);
     };
   }, []);
-  const [report, setReport] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [isVerified, setIsVerified] = useState(false);
-  const [userData, setUserData] = useState(null);
-  const address = useTonAddress();
-  const [tonConnectUI] = useTonConnectUI();
-  const trackEvent = useTWAEvent();
-
-  const CLIENT_ID = "nPiytmRGEQGNoYAhR85q";
-  const REDIRECT_URI = "https://ai-pulse-ton.vercel.app/auth/callback";
-
-  // PKCE Helpers
-  const base64URLEncode = (buffer) => {
-    return btoa(String.fromCharCode(...new Uint8Array(buffer)))
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=/g, '');
-  };
-
-  const generateCodeVerifier = () => {
-    const array = new Uint8Array(32);
-    window.crypto.getRandomValues(array);
-    return base64URLEncode(array);
-  };
-
-  const generateCodeChallenge = async (verifier) => {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(verifier);
-    const hash = await window.crypto.subtle.digest('SHA-256', data);
-    return base64URLEncode(hash);
-  };
-
-  // Инициализация верификации (Implicit Flow)
-  const startVerification = () => {
-    const state = Math.random().toString(36).substring(7);
-    localStorage.setItem('ton_id_state', state);
-
-    const params = new URLSearchParams({
-      client_id: CLIENT_ID,
-      redirect_uri: REDIRECT_URI,
-      response_type: 'id_token',
-      scope: 'openid profile',
-      state: state
-    });
-
-    window.location.href = `https://oauth2.ton.org/authorize?${params.toString()}`;
-  };
-
-  // Обработка callback при загрузке
-  useEffect(() => {
-    const handleCallback = async () => {
-      // TON ID присылает данные в query или hash
-      const urlParams = new URLSearchParams(window.location.search || window.location.hash.replace('#', '?'));
-      const token = urlParams.get('id_token');
-      const state = urlParams.get('state');
-      const savedState = localStorage.getItem('ton_id_state');
-
-      if (token && state === savedState) {
-        window.history.replaceState({}, document.title, window.location.pathname);
-
-        try {
-          const verifyResponse = await fetch(`${BACKEND_URL}/api/auth/verify`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token })
-          });
-
-          const verifyData = await verifyResponse.json();
-
-          if (verifyData.success) {
-            setIsVerified(true);
-            setUserData(verifyData.user || { name: 'Verified User' });
-            WebApp.showAlert(`✅ Личность подтверждена!`);
-          }
-        } catch (err) {
-          console.error('Auth error:', err);
-          WebApp.showAlert('Ошибка подтверждения на сервере');
-        }
-      }
-    };
-
-    handleCallback();
-  }, [BACKEND_URL]);
-
-  // Отслеживание подключения кошелька
-  useEffect(() => {
-    if (address) {
-      trackEvent.track('wallet_connected', {
-        address: address,
-        platform: WebApp.platform,
-        version: WebApp.version
-      });
-    }
-  }, [address, trackEvent]);
 
   const fetchReport = async () => {
     if (!address) {
@@ -151,27 +108,17 @@ function MainContent() {
       return;
     }
 
-    // TG Analytics: трекинг клика на "Получить отчет"
     if (window.tgAnalytics) {
-      window.tgAnalytics.track('click_get_report', {
-        wallet: address,
-        platform: 'tma'
-      });
+      window.tgAnalytics.track('click_get_report', { wallet: address, platform: 'tma' });
     }
-
-    // Отслеживание начала базового анализа (Telemetree)
-    trackEvent.track('basic_analysis_started', {
-      address: address
-    });
+    trackEvent.track('basic_analysis_started', { address: address });
 
     setLoading(true);
     setError(null);
 
     try {
       const response = await fetch(`${BACKEND_URL}/api/analyze/${address}`);
-      if (!response.ok) {
-        throw new Error('Ошибка получения отчета');
-      }
+      if (!response.ok) throw new Error('Ошибка получения отчета');
       const data = await response.json();
       setReport(data);
     } catch (err) {
@@ -188,12 +135,8 @@ function MainContent() {
       return;
     }
 
-    // TG Analytics: трекинг клика на "Глубокий анализ"
     if (window.tgAnalytics) {
-      window.tgAnalytics.track('click_deep_analysis', {
-        wallet: address,
-        platform: 'tma'
-      });
+      window.tgAnalytics.track('click_deep_analysis', { wallet: address, platform: 'tma' });
     }
 
     try {
@@ -208,13 +151,7 @@ function MainContent() {
       };
 
       await tonConnectUI.sendTransaction(transaction);
-
-      // Отслеживание покупки премиум-анализа
-      trackEvent.track('premium_analysis_purchased', {
-        address: address,
-        amount: '0.1'
-      });
-
+      trackEvent.track('premium_analysis_purchased', { address: address, amount: '0.1' });
       WebApp.showAlert('Транзакция отправлена! Глубокий анализ скоро будет доступен.');
 
       const response = await fetch(`${BACKEND_URL}/api/deep-analyze/${address}`);
@@ -227,7 +164,6 @@ function MainContent() {
 
   return (
     <div className="min-h-screen bg-[#0f172a] text-white flex flex-col items-center p-6 font-sans relative overflow-hidden">
-      {/* Декоративный светящийся круг на фоне */}
       <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-500/10 blur-[120px] rounded-full pointer-events-none"></div>
       <div className="absolute bottom-[-10%] right-[-10%] w-[30%] h-[30%] bg-cyan-500/10 blur-[100px] rounded-full pointer-events-none"></div>
 
@@ -241,7 +177,6 @@ function MainContent() {
       </header>
 
       <main className="z-10 w-full max-w-md space-y-4">
-        {/* Контейнер для кошелька */}
         <div className="bg-slate-800/40 backdrop-blur-xl border border-slate-700/50 p-6 rounded-3xl shadow-xl flex flex-col items-center">
           <TonConnectButton />
           {address && (
@@ -251,41 +186,18 @@ function MainContent() {
           )}
         </div>
 
-        {/* Кнопка TON ID (Временно отключено) */}
-        {/* {!isVerified ? (
-          <button
-            onClick={startVerification}
-            style={{ backgroundColor: 'rgba(79, 70, 229, 0.2)', border: '1px solid rgba(99, 102, 241, 0.5)' }}
-            className="w-full py-4 px-6 rounded-2xl font-bold text-indigo-400 transition-all flex items-center justify-center gap-2 hover:bg-indigo-500/20 active:scale-[0.98]"
-          >
-            <span>🆔</span> Подтвердить личность (TON ID)
-          </button>
-        ) : (
-          <div className="w-full py-3 px-6 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl flex items-center justify-between animate-pulse">
-            <div className="flex items-center gap-2">
-              <span className="text-emerald-400">✅</span>
-              <span className="text-sm font-medium text-emerald-400">Личность подтверждена</span>
-            </div>
-            {userData && <span className="text-xs text-slate-400">{userData.name}</span>}
-          </div>
-        )} */}
-
-        {/* Кнопка отчета */}
         <button
           onClick={fetchReport}
           disabled={loading || !address}
-          className="w-full py-4 px-6 bg-gradient-to-r from-cyan-500 to-blue-600 rounded-2xl font-bold shadow-[0_0_20px_rgba(6,182,212,0.3)] active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
+          className="w-full py-4 px-6 bg-gradient-to-r from-cyan-500 to-blue-600 rounded-2xl font-bold shadow-[0_0_20px_rgba(6,182,212,0.3)] active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {loading ? (
             <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
           ) : (
-            <>
-              <span>🔍</span> Получить AI-отчет
-            </>
+            <><span>🔍</span> Получить AI-отчет</>
           )}
         </button>
 
-        {/* Кнопка глубокого анализа */}
         <button
           onClick={requestDeepAnalysis}
           disabled={!address}
@@ -294,60 +206,37 @@ function MainContent() {
           <span>💎</span> Глубокий анализ <span className="text-blue-400 font-bold">(0.1 TON)</span>
         </button>
 
-        {/* Сообщение об ошибке */}
         {error && (
           <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-4 text-red-400 text-sm">
             ❌ {error}
           </div>
         )}
 
-        {/* Карточка с отчетом */}
         {report && (
           <div className="bg-slate-800/40 backdrop-blur-xl border border-slate-700/50 p-6 rounded-3xl shadow-xl animate-[fadeIn_0.3s_ease-out]">
-            <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
-              📊 AI Вердикт
-            </h2>
-
-            <div className={`inline-flex items-center px-3 py-1.5 rounded-full text-sm font-semibold mb-4 ${report.sentiment === 'bullish'
-              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-              : report.sentiment === 'bearish'
-                ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-                : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+            <h2 className="text-lg font-bold mb-4 flex items-center gap-2">📊 AI Вердикт</h2>
+            <div className={`inline-flex items-center px-3 py-1.5 rounded-full text-sm font-semibold mb-4 ${report.sentiment === 'bullish' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                report.sentiment === 'bearish' ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
+                  'bg-amber-500/20 text-amber-400 border border-amber-500/30'
               }`}>
-              {report.sentiment === 'bullish' ? '🚀 Bullish' :
-                report.sentiment === 'bearish' ? '📉 Bearish' : '⚖️ Neutral'}
+              {report.sentiment === 'bullish' ? '🚀 Bullish' : report.sentiment === 'bearish' ? '📉 Bearish' : '⚖️ Neutral'}
             </div>
-
-            <p className="text-slate-300 text-sm leading-relaxed mb-4">
-              {report.report}
-            </p>
-
-            {report.details && report.details.length > 0 && (
-              <div className="space-y-2 pt-4 border-t border-slate-700/50">
-                {report.details.map((detail, index) => (
-                  <div key={index} className="flex items-center gap-3 text-sm text-slate-400 bg-slate-900/50 rounded-xl p-3">
-                    <span className="text-lg">{detail.icon}</span>
-                    <span>{detail.text}</span>
-                  </div>
-                ))}
+            <p className="text-slate-300 text-sm leading-relaxed mb-4">{report.report}</p>
+            {report.details?.map((detail, index) => (
+              <div key={index} className="flex items-center gap-3 text-sm text-slate-400 bg-slate-900/50 rounded-xl p-3 mb-2">
+                <span className="text-lg">{detail.icon}</span>
+                <span>{detail.text}</span>
               </div>
-            )}
+            ))}
           </div>
         )}
       </main>
 
       <footer className="mt-auto pt-10 text-slate-500 text-[10px] uppercase tracking-[2px] z-10 flex flex-col items-center gap-2">
         <span>Powered by AI & TON Blockchain</span>
-        <div className="flex flex-col items-center gap-1 normal-case tracking-normal">
-          <div className="flex items-center gap-1.5">
-            <div className={`w-1.5 h-1.5 rounded-full ${tgAnalyticsReady ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-slate-600'}`}></div>
-            <span className="text-[9px]">{tgAnalyticsReady ? 'TG Analytics Active' : 'TG Analytics Connecting...'}</span>
-          </div>
-          {!tgAnalyticsReady && (
-            <span className="text-[8px] text-slate-600">
-              {!TG_ANALYTICS_TOKEN ? 'Missing Token' : !window.tgAnalytics ? 'SDK Script Not Loaded' : 'Init Error'}
-            </span>
-          )}
+        <div className="flex items-center gap-1.5">
+          <div className={`w-1.5 h-1.5 rounded-full ${tgAnalyticsReady ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-slate-600'}`}></div>
+          <span className="text-[9px]">{tgAnalyticsReady ? 'TG Analytics Active' : 'TG Analytics Connecting...'}</span>
         </div>
       </footer>
     </div>
@@ -355,14 +244,26 @@ function MainContent() {
 }
 
 function App() {
+  const [authToken, setAuthToken] = useState(localStorage.getItem('auth_token'));
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token');
+    if (token) {
+      localStorage.setItem('auth_token', token);
+      setAuthToken(token);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
+
   return (
     <TwaAnalyticsProvider
-      projectId={import.meta.env.VITE_TELEMETREE_PROJECT_ID || "YOUR_PROJECT_ID"}
-      apiKey={import.meta.env.VITE_TELEMETREE_API_KEY || "YOUR_API_KEY"}
+      projectId={import.meta.env.VITE_TELEMETREE_PROJECT_ID || "ai_pulse_ton"}
+      apiKey={import.meta.env.VITE_TELEMETREE_API_KEY || ""}
       appName="AI Pulse TON"
     >
       <TonConnectUIProvider manifestUrl={`${window.location.origin}/tonconnect-manifest.json`}>
-        <MainContent />
+        {authToken ? <MainContent /> : <WelcomePage />}
       </TonConnectUIProvider>
     </TwaAnalyticsProvider>
   );
