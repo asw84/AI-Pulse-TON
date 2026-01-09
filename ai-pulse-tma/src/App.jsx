@@ -9,7 +9,7 @@ WebApp.ready();
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 const TG_ANALYTICS_TOKEN = import.meta.env.VITE_TG_ANALYTICS_TOKEN || '';
-const CLIENT_ID = import.meta.env.VITE_TON_ID_CLIENT_ID || 'nPiytmRGEQGNoYAhR85q';
+const CLIENT_ID = import.meta.env.VITE_TON_ID_CLIENT_ID || 'nPiytmRGEQGNOYAhR85q';
 
 // PKCE Helpers
 const base64URLEncode = (buffer) => {
@@ -43,7 +43,7 @@ function WelcomePage() {
 
     // ВАЖНО: Этот URL должен БУКВА В БУКВУ совпадать с тем, что в TON Builders!
     const redirectUri = 'https://ai-pulse-ton.vercel.app/auth/callback';
-    const scope = 'openid profile';
+    const scope = 'openid profile wallet';
 
     const params = new URLSearchParams();
     params.append('response_type', 'code');
@@ -288,6 +288,15 @@ function App() {
       const params = new URLSearchParams(window.location.search);
       const code = params.get('code');
       const state = params.get('state');
+      const error = params.get('error');
+      const errorDesc = params.get('error_description');
+
+      if (error) {
+        setAuthError(`${error}: ${errorDesc || ''}`);
+        window.history.replaceState({}, document.title, window.location.pathname);
+        return;
+      }
+
       const savedState = localStorage.getItem('ton_id_state');
       const verifier = localStorage.getItem('ton_id_verifier');
 
