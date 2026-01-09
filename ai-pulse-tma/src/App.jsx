@@ -42,18 +42,18 @@ function WelcomePage() {
     localStorage.setItem('ton_id_state', state);
 
     // Теперь используем фронтенд как redirect_uri для PKCE flow
-    const redirectUri = `${window.location.origin}/auth/callback`;
-    const scope = 'openid profile wallet';
+    // ВАЖНО: Этот URL должен быть в белом списке в TON Builders!
+    const redirectUri = window.location.origin + '/auth/callback';
+    const scope = 'openid profile offline_access';
 
-    const params = new URLSearchParams({
-      response_type: 'code',
-      client_id: CLIENT_ID,
-      redirect_uri: redirectUri,
-      scope: scope,
-      state: state,
-      code_challenge: challenge,
-      code_challenge_method: 'S256'
-    });
+    const params = new URLSearchParams();
+    params.append('response_type', 'code');
+    params.append('client_id', CLIENT_ID);
+    params.append('redirect_uri', redirectUri);
+    params.append('scope', scope);
+    params.append('state', state);
+    params.append('code_challenge', challenge);
+    params.append('code_challenge_method', 'S256');
 
     window.location.href = `https://id.ton.org/v1/oauth2/signin?${params.toString()}`;
   };
@@ -343,6 +343,12 @@ function App() {
       appName="AI Pulse TON"
     >
       <TonConnectUIProvider manifestUrl={`${window.location.origin}/tonconnect-manifest.json`}>
+        {authError && (
+          <div className="fixed top-0 left-0 w-full z-[100] p-4 bg-red-500/90 text-white text-center text-sm backdrop-blur-md">
+            ⚠️ Ошибка входа: {authError}
+            <button onClick={() => setAuthError(null)} className="ml-4 underline">Закрыть</button>
+          </div>
+        )}
         {authToken ? <MainContent /> : <WelcomePage />}
       </TonConnectUIProvider>
     </TwaAnalyticsProvider>
