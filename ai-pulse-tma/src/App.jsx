@@ -360,7 +360,8 @@ function App() {
             <button onClick={() => setAuthError(null)} className="ml-4 underline">Закрыть</button>
           </div>
         )}
-        {authToken ? <MainContent /> : <WelcomePage />}
+        {/* TON ID временно недоступен (503), показываем основной контент */}
+        <MainContent />
       </TonConnectUIProvider>
     </TwaAnalyticsProvider>
   );
