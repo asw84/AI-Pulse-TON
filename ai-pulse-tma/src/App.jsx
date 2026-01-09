@@ -42,7 +42,7 @@ function WelcomePage() {
     localStorage.setItem('ton_id_state', state);
 
     const redirectUri = 'https://ai-pulse-ton.vercel.app/auth/callback';
-    const scope = 'openid profile wallet';
+    const scope = 'openid profile';
 
     const params = new URLSearchParams();
     params.append('response_type', 'code');
