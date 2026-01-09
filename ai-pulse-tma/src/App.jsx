@@ -41,7 +41,6 @@ function WelcomePage() {
     localStorage.setItem('ton_id_verifier', verifier);
     localStorage.setItem('ton_id_state', state);
 
-    // ВАЖНО: Этот URL должен БУКВА В БУКВУ совпадать с тем, что в TON Builders!
     const redirectUri = 'https://ai-pulse-ton.vercel.app/auth/callback';
     const scope = 'openid profile wallet';
 
@@ -53,8 +52,19 @@ function WelcomePage() {
     params.append('state', state);
     params.append('code_challenge', challenge);
     params.append('code_challenge_method', 'S256');
+    params.append('response_format', 'json');
 
-    window.location.href = `https://id.ton.org/v1/oauth2/signin?${params.toString()}`;
+    try {
+      const response = await fetch(`https://id.ton.org/v1/oauth2/signin?${params.toString()}`);
+      const result = await response.json();
+      if (result.status === 'success' && result.data?.url) {
+        WebApp.openTelegramLink(result.data.url);
+      } else {
+        throw new Error(result.message || 'Error getting auth link');
+      }
+    } catch (err) {
+      WebApp.showAlert('Auth Error: ' + err.message);
+    }
   };
 
   return (
