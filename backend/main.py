@@ -320,6 +320,12 @@ class AuthRequest(BaseModel):
     token: str
 
 
+class ExchangeRequest(BaseModel):
+    code: str
+    code_verifier: str
+    redirect_uri: str
+
+
 @app.post("/api/auth/verify")
 async def verify_ton_id(payload: AuthRequest):
     """
@@ -350,25 +356,55 @@ async def verify_ton_id(payload: AuthRequest):
         raise HTTPException(status_code=401, detail="Verification failed")
 
 
+@app.post("/api/auth/exchange")
+async def exchange_token(payload: ExchangeRequest):
+    """
+    Exchanges authorization code for tokens using PKCE (code_verifier)
+    """
+    logger.info(f"[Auth] Exchanging code: {payload.code[:10]}...")
+    
+    clientId = "nPiytmRGEQGNoYAhR85q"
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post("https://id.ton.org/v1/oauth2/token", data={
+                "grant_type": "authorization_code",
+                "code": payload.code,
+                "code_verifier": payload.code_verifier,
+                "redirect_uri": payload.redirect_uri,
+                "client_id": clientId
+            })
+            
+            if response.status_code != 200:
+                logger.error(f"[Auth] Token exchange failed: {response.text}")
+                raise HTTPException(status_code=response.status_code, detail="Token exchange failed")
+                
+            return response.json()
+            
+        except Exception as e:
+            logger.error(f"[Auth] Exchange error: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/auth/callback")
 async def auth_callback(code: str):
     """
-    TON ID Callback handler
-    Обменивает code на access_token и данные пользователя
+    TON ID Callback handler (legacy/non-PKCE or server-side only)
     """
     logger.info(f"[Auth] Received callback with code: {code[:10]}...")
     
     clientId = "nPiytmRGEQGNoYAhR85q"
-    # Рекомендуется хранить секрет в .env
     clientSecret = os.getenv("TON_ID_SECRET", "") 
     
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.post("https://oauth.ton.org/token", data={
+            # Обновлено на id.ton.org
+            response = await client.post("https://id.ton.org/v1/oauth2/token", data={
                 "client_id": clientId,
                 "client_secret": clientSecret,
                 "code": code,
-                "grant_type": "authorization_code"
+                "grant_type": "authorization_code",
+                "redirect_uri": f"{BACKEND_URL}/api/auth/callback" # Должен совпадать с тем что в TON Builders
             })
             
             if response.status_code != 200:
@@ -376,12 +412,6 @@ async def auth_callback(code: str):
                 return RedirectResponse(url=f"{FRONTEND_URL}/?error=auth_failed")
                 
             data = response.json()
-            logger.info(f"[Auth] Successfully exchanged code for token")
-            
-            # Тут придут подтвержденные TG ID и адрес кошелька
-            # data['access_token'], data.get('id_token'), etc.
-            
-            # Перенаправляем пользователя на фронтенд с токеном
             return RedirectResponse(url=f"{FRONTEND_URL}/?token={data.get('access_token')}")
             
         except Exception as e:
