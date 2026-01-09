@@ -9,7 +9,8 @@ WebApp.ready();
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 const TG_ANALYTICS_TOKEN = import.meta.env.VITE_TG_ANALYTICS_TOKEN || '';
-const CLIENT_ID = import.meta.env.VITE_TON_ID_CLIENT_ID || 'nPiytmRGEQGNOYAhR85q';
+// ВРЕМЕННО: используем debug для теста (потом вернуть реальный ID)
+const CLIENT_ID = import.meta.env.VITE_TON_ID_CLIENT_ID || 'debug';
 
 // PKCE Helpers
 const base64URLEncode = (buffer) => {
@@ -42,19 +43,20 @@ function WelcomePage() {
     localStorage.setItem('ton_id_state', state);
 
     const redirectUri = 'https://ai-pulse-ton.vercel.app/auth/callback';
-    const scope = 'openid profile offline_access';
+    // Используем + как разделитель, как в документации
+    const scope = 'openid+profile+offline_access';
 
-    const params = new URLSearchParams();
-    params.append('response_type', 'code');
-    params.append('client_id', CLIENT_ID);
-    params.append('redirect_uri', redirectUri);
-    params.append('scope', scope);
-    params.append('state', state);
-    params.append('code_challenge', challenge);
-    params.append('code_challenge_method', 'S256');
+    // Собираем URL вручную, чтобы scope не был закодирован
+    const authUrl = `https://id.ton.org/v1/oauth2/signin?` +
+      `response_type=code&` +
+      `client_id=${CLIENT_ID}&` +
+      `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+      `scope=${scope}&` +
+      `state=${state}&` +
+      `code_challenge=${challenge}&` +
+      `code_challenge_method=S256`;
 
-    // Прямой редирект на эндпоинт авторизации, как указано в п.2 документации
-    const authUrl = `https://id.ton.org/v1/oauth2/signin?${params.toString()}`;
+    console.log('Auth URL:', authUrl);
     window.location.href = authUrl;
   };
 
